@@ -16,7 +16,9 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 
+	"github.com/gophercises/task/students/barisere/data"
 	"github.com/spf13/cobra"
 )
 
@@ -26,7 +28,25 @@ var listCmd = &cobra.Command{
 	Short: "List all of your incomplete tasks",
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("list called")
+		storage, err := data.NewStorage()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Failed to create db connection", err)
+			os.Exit(1)
+		}
+		defer storage.Close()
+		todos, err := storage.List()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Failed to retrieve Todo list\n", err)
+			os.Exit(1)
+		}
+		for _, v := range todos {
+			if v.Status == data.Pending {
+				fmt.Print("[ ] ")
+			} else if v.Status == data.Done {
+				fmt.Print("[X] ")
+			}
+			fmt.Fprintf(os.Stdout, "%d.\t%s\n", v.ID, v.Description)
+		}
 	},
 }
 

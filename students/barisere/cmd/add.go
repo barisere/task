@@ -16,8 +16,10 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
+	"github.com/gophercises/task/students/barisere/data"
 	"github.com/spf13/cobra"
 )
 
@@ -27,7 +29,18 @@ var addCmd = &cobra.Command{
 	Short: "Add a new task to your TODO list",
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println(strings.Join(args, " "), "added to your TODO list")
+		todo := data.NewTodo(0, data.Pending, strings.Join(args, " "))
+		storage, err := data.NewStorage()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Failed to create db connection", err)
+			os.Exit(1)
+		}
+		defer storage.Close()
+		if err = storage.Save(todo); err != nil {
+			fmt.Fprintln(os.Stderr, "Failed to save Todo\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("\"%s\" %s\n", strings.Join(args, " "), "added to your TODO list")
 	},
 	Args: cobra.MinimumNArgs(1),
 }

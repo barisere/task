@@ -1,38 +1,40 @@
 package data
 
 import (
+	"encoding/binary"
+
 	"github.com/boltdb/bolt"
 	"github.com/pkg/errors"
-	"gopkg.in/yaml.v2"
 )
 
-var bucketName = []byte("todos")
+var (
+	pendingBucket = []byte("todos")
+	doneBucket    = []byte("done")
+	dbFile        = "bolt.db"
+)
 
-// BoltStorage stores and manipulates Todo items in a Bolt database
-type BoltStorage struct {
-	Name string
-	DB   *bolt.DB
+// boltStorage stores and manipulates Todo items in a Bolt database
+type boltStorage struct {
+	name string
+	db   *bolt.DB
 }
 
-// NewBoltStorage constructs a boltStorage with a DB connection opened
-func NewBoltStorage(dbFile string) (*BoltStorage, error) {
-	if dbFile == "" {
-		return nil, errors.New("no database file passed")
-	}
+// newBoltStorage constructs a boltStorage with a db connection opened
+func newBoltStorage() (*boltStorage, error) {
 	db, err := bolt.Open(dbFile, 0666, nil)
 	if err != nil {
 		return nil, err
 	}
-	return &BoltStorage{
-		Name: dbFile,
-		DB:   db,
+	return &boltStorage{
+		name: dbFile,
+		db:   db,
 	}, nil
 }
 
 // Save a Todo item to a Bolt database
-func (bs BoltStorage) Save(todo Todo) error {
-	err := bs.DB.Update(func(tx *bolt.Tx) error {
-		bucket, err := tx.CreateBucketIfNotExists(bucketName)
+func (bs boltStorage) Save(todo Todo) error {
+	err := bs.db.Update(func(tx *bolt.Tx) error {
+		bucket, err := tx.CreateBucketIfNotExists(pendingBucket)
 		if err != nil {
 			return err
 		}
@@ -45,7 +47,7 @@ func (bs BoltStorage) Save(todo Todo) error {
 		if err != nil {
 			return err
 		}
-		key, value := []byte(todo.Description), yamlBytes
+		key, value := itob(next), yamlBytes
 
 		if err := bucket.Put(key, value); err != nil {
 			return err
@@ -56,10 +58,10 @@ func (bs BoltStorage) Save(todo Todo) error {
 }
 
 // Remove a Todo item from a Bolt database
-func (bs BoltStorage) Remove(todo Todo) error {
-	key := []byte(todo.Description)
-	err := bs.DB.Update(func(tx *bolt.Tx) error {
-		bucket, err := tx.CreateBucketIfNotExists(bucketName)
+func (bs boltStorage) Remove(todo Todo) error {
+	key := itob(todo.ID)
+	err := bs.db.Update(func(tx *bolt.Tx) error {
+		bucket, err := tx.CreateBucketIfNotExists(pendingBucket)
 		if err != nil {
 			return err
 		}
@@ -72,14 +74,18 @@ func (bs BoltStorage) Remove(todo Todo) error {
 }
 
 // Do marks a Todo item 'done' in a Bolt database
-func (bs BoltStorage) Do(todo Todo) error {
-	key := []byte(todo.Description)
-	err := bs.DB.Update(func(tx *bolt.Tx) error {
-		bucket, err := tx.CreateBucketIfNotExists(bucketName)
+func (bs boltStorage) Do(todo Todo) error {
+	key := itob(todo.ID)
+	err := bs.db.Update(func(tx *bolt.Tx) error {
+		pending, err := tx.CreateBucketIfNotExists(pendingBucket)
 		if err != nil {
 			return err
 		}
-		if fetched := bucket.Get(key); fetched != nil {
+		done, err := tx.CreateBucketIfNotExists(doneBucket)
+		if err != nil {
+			return err
+		}
+		if fetched := pending.Get(key); fetched != nil {
 			oldTodo, err := fromYAMLBytes(fetched)
 			if err != nil {
 				return err
@@ -88,7 +94,10 @@ func (bs BoltStorage) Do(todo Todo) error {
 			if err != nil {
 				return err
 			}
-			if err = bucket.Put(key, newTodoBytes); err != nil {
+			if err = pending.Delete(key); err != nil {
+				return err
+			}
+			if err = done.Put(key, newTodoBytes); err != nil {
 				return err
 			}
 		}
@@ -102,11 +111,20 @@ func (bs BoltStorage) Do(todo Todo) error {
 //
 // The specificity of the matching is, in decreasing order of priority,
 // ID > Status > Description
-func (bs BoltStorage) List(todo ...Todo) ([]Todo, error) {
+func (bs boltStorage) List() ([]Todo, error) {
 	var todos []Todo
-	err := bs.DB.View(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket(bucketName)
-		err := bucket.ForEach(func(k, v []byte) error {
+	err := bs.db.View(func(tx *bolt.Tx) error {
+		pendings := tx.Bucket(pendingBucket)
+		err := pendings.ForEach(func(k, v []byte) error {
+			todoItem, err := fromYAMLBytes(v)
+			if err != nil {
+				return err
+			}
+			todos = append(todos, todoItem)
+			return nil
+		})
+		dones := tx.Bucket(doneBucket)
+		err = dones.ForEach(func(k, v []byte) error {
 			todoItem, err := fromYAMLBytes(v)
 			if err != nil {
 				return err
@@ -119,12 +137,13 @@ func (bs BoltStorage) List(todo ...Todo) ([]Todo, error) {
 	return todos, err
 }
 
-func toYAMLBytes(todo Todo) ([]byte, error) {
-	return yaml.Marshal(todo)
+func (bs boltStorage) Close() error {
+	return bs.db.Close()
 }
 
-func fromYAMLBytes(yamlBytes []byte) (Todo, error) {
-	todo := Todo{}
-	err := yaml.Unmarshal(yamlBytes, &todo)
-	return todo, err
+// itob returns an 8-byte big endian representation of v.
+func itob(v uint64) []byte {
+	b := make([]byte, 8)
+	binary.BigEndian.PutUint64(b, v)
+	return b
 }

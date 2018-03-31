@@ -1,5 +1,7 @@
 package data
 
+import yaml "gopkg.in/yaml.v2"
+
 // Status of a Todo
 const (
 	Pending TodoStatus = iota
@@ -34,10 +36,12 @@ func NewTodo(ID uint64, status TodoStatus, description string) Todo {
 	}
 }
 
-// Storage provides functionality for persisting TODOs
-type Storage interface {
-	Save(Todo) error
-	Remove(Todo) error
-	Do(Todo) error
-	List() []Todo
+func toYAMLBytes(todo Todo) ([]byte, error) {
+	return yaml.Marshal(todo)
+}
+
+func fromYAMLBytes(yamlBytes []byte) (Todo, error) {
+	todo := Todo{}
+	err := yaml.Unmarshal(yamlBytes, &todo)
+	return todo, err
 }

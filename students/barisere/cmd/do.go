@@ -16,18 +16,38 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 
+	"github.com/gophercises/task/students/barisere/data"
 	"github.com/spf13/cobra"
 )
 
 // doCmd represents the do command
 var doCmd = &cobra.Command{
-	Use:   "do",
+	Use:   "do id...",
 	Short: "Mark a task on your TODO list as complete",
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println(strings.Join(args, " "), "completed")
+		storage, err := data.NewStorage()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Failed to create db connection", err)
+			os.Exit(1)
+		}
+		defer storage.Close()
+		for _, v := range args {
+			id, err := strconv.ParseUint(v, 10, 0)
+			if err != nil {
+				continue
+			}
+			todo := data.NewTodo(id, data.Pending, "")
+			if err = storage.Do(todo); err != nil {
+				fmt.Fprintln(os.Stderr, "Failed to save Todo\n", err)
+				os.Exit(1)
+			}
+		}
+		fmt.Printf("Todo item #%s removed from your todo list\n", strings.Join(args, " "))
 	},
 }
 
